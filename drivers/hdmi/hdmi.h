@@ -39,11 +39,7 @@ static const uint8_t textmode_palette[16] = {
     200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215
 };
 
-
-static void graphics_set_flashmode(bool flash_line, bool flash_frame) {
-    // dummy
-}
-
+void graphics_set_flashmode(bool flash_line, bool flash_frame);
 
 #ifdef __cplusplus
 }

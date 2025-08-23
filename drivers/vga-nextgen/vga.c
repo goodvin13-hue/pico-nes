@@ -12,6 +12,8 @@
 #include "pico/stdlib.h"
 #include "stdlib.h"
 
+bool SELECT_VGA = true;
+
 uint16_t pio_program_VGA_instructions[] = {
     //     .wrap_target
     0x6008, //  0: out    pins, 8
@@ -42,12 +44,12 @@ static int visible_line_size = 320;
 static int dma_chan_ctrl;
 static int dma_chan;
 
-static uint8_t* graphics_buffer;
+uint8_t* graphics_buffer;
 uint8_t* text_buffer = NULL;
-static uint graphics_buffer_width = 0;
-static uint graphics_buffer_height = 0;
-static int graphics_buffer_shift_x = 0;
-static int graphics_buffer_shift_y = 0;
+uint graphics_buffer_width = 0;
+uint graphics_buffer_height = 0;
+int graphics_buffer_shift_x = 0;
+int graphics_buffer_shift_y = 0;
 
 static bool is_flash_line = false;
 static bool is_flash_frame = false;
@@ -333,6 +335,12 @@ void __time_critical_func() dma_handler_VGA() {
 }
 
 void graphics_set_mode(enum graphics_mode_t mode) {
+    #ifdef HDMI
+    if (!SELECT_VGA) {
+        hdmi_graphics_set_mode(mode);
+        return;
+    }
+    #endif
     switch (mode) {
         case TEXTMODE_53x30:
             text_buffer_width = 40;
@@ -474,7 +482,7 @@ void graphics_set_offset(const int x, const int y) {
     graphics_buffer_shift_y = y;
 }
 
-void graphics_set_flashmode(const bool flash_line, const bool flash_frame) {
+void graphics_set_flashmode(bool flash_line, bool flash_frame) {
     is_flash_frame = flash_frame;
     is_flash_line = flash_line;
 }
@@ -484,6 +492,12 @@ void graphics_set_textbuffer(uint8_t* buffer) {
 }
 
 void graphics_set_bgcolor(const uint32_t color888) {
+    #ifdef HDMI
+    if (!SELECT_VGA) {
+        hdmi_graphics_set_palette(255, color888);
+        return;
+    }
+    #endif
     const uint8_t conv0[] = { 0b00, 0b00, 0b01, 0b10, 0b10, 0b10, 0b11, 0b11 };
     const uint8_t conv1[] = { 0b00, 0b01, 0b01, 0b01, 0b10, 0b11, 0b11, 0b11 };
 
@@ -501,6 +515,12 @@ void graphics_set_bgcolor(const uint32_t color888) {
 }
 
 void graphics_set_palette(const uint8_t i, const uint32_t color888) {
+    #ifdef HDMI
+    if (!SELECT_VGA) {
+        hdmi_graphics_set_palette(i, color888);
+        return;
+    }
+    #endif
     const uint8_t conv0[] = { 0b00, 0b00, 0b01, 0b10, 0b10, 0b10, 0b11, 0b11 };
     const uint8_t conv1[] = { 0b00, 0b01, 0b01, 0b01, 0b10, 0b11, 0b11, 0b11 };
 
@@ -516,7 +536,22 @@ void graphics_set_palette(const uint8_t i, const uint32_t color888) {
     palette[1][i] = (c_lo << 8 | c_hi) & 0x3f3f | palette16_mask;
 }
 
+size_t getCols() {
+    #ifdef HDMI
+    if (!SELECT_VGA) {
+        return 53;
+    }
+    #endif
+    return 80;
+}
+
 void graphics_init() {
+    #ifdef HDMI
+    if (!SELECT_VGA) {
+        hdmi_graphics_init();
+        return;
+    }
+    #endif
     //инициализация палитры по умолчанию
 #if 1
     const uint8_t conv0[] = { 0b00, 0b00, 0b01, 0b10, 0b10, 0b10, 0b11, 0b11 };
@@ -626,6 +661,10 @@ void graphics_init() {
 void clrScr(const uint8_t color) {
     uint16_t* t_buf = (uint16_t *)text_buffer;
     int size = TEXTMODE_COLS * TEXTMODE_ROWS;
-
+    #ifdef HDMI
+    if (!SELECT_VGA) {
+        size = 53 * TEXTMODE_ROWS;
+    }
+    #endif
     while (size--) *t_buf++ = color << 4 | ' ';
 }

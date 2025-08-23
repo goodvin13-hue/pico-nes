@@ -18,7 +18,7 @@ static int SM_video = -1;
 static int SM_conv = -1;
 
 //активный видеорежим
-static enum graphics_mode_t graphics_mode = GRAPHICSMODE_DEFAULT;
+static enum graphics_mode_t graphics_mode = TEXTMODE_DEFAULT;
 
 //буфер  палитры 256 цветов в формате R8G8B8
 static uint32_t palette[256];
@@ -27,15 +27,12 @@ static uint32_t palette[256];
 #define SCREEN_WIDTH (320)
 #define SCREEN_HEIGHT (240)
 //графический буфер
-static uint8_t* __scratch_y("hdmi_ptr_1") graphics_buffer = NULL;
-static int graphics_buffer_width = 0;
-static int graphics_buffer_height = 0;
-static int graphics_buffer_shift_x = 0;
-static int graphics_buffer_shift_y = 0;
+extern uint8_t*  graphics_buffer;
+extern uint graphics_buffer_width, graphics_buffer_height;
+extern int  graphics_buffer_shift_x, graphics_buffer_shift_y;
 
 //текстовый буфер
-uint8_t* text_buffer = NULL;
-
+extern uint8_t* text_buffer;
 
 //DMA каналы
 //каналы работы с первичным графическим буфером
@@ -187,36 +184,35 @@ static void __scratch_y("hdmi_driver") dma_handler_HDMI() {
 
     if (graphics_buffer && line < 480 ) {
         //область изображения
-        uint8_t* input_buffer = &graphics_buffer[(line / 2) * graphics_buffer_width];
-        uint8_t* output_buffer = activ_buf + 72; //для выравнивания синхры;
-        int y = line / 2;
+        register uint8_t* input_buffer = &graphics_buffer[(line / 2) * graphics_buffer_width];
+        register uint8_t* output_buffer = activ_buf + 72; //для выравнивания синхры;
+        register int y = line / 2;
+        register int shift_x = graphics_buffer_shift_x;
+        register int shift_y = graphics_buffer_shift_y;
         switch (graphics_mode) {
             case GRAPHICSMODE_DEFAULT:
             case VGA_320x240x256:
                 //заполняем пространство сверху и снизу графического буфера
-                if (false || (graphics_buffer_shift_y > y) || (y >= (graphics_buffer_shift_y + graphics_buffer_height))
-                    || (graphics_buffer_shift_x >= SCREEN_WIDTH) || (
-                        (graphics_buffer_shift_x + graphics_buffer_width) < 0)) {
-                    memset(output_buffer, 255,SCREEN_WIDTH);
+                if ((shift_y > y) || (y >= (shift_y + graphics_buffer_height)) || (shift_x >= SCREEN_WIDTH) || (
+                        (shift_x + graphics_buffer_width) < 0)) {
+                    memset(output_buffer, 255, SCREEN_WIDTH);
                     break;
                 }
 
                 uint8_t* activ_buf_end = output_buffer + SCREEN_WIDTH;
             //рисуем пространство слева от буфера
-                for (int i = graphics_buffer_shift_x; i-- > 0;) {
+                for (int i = shift_x; i-- > 0;) {
                     *output_buffer++ = 255;
                 }
 
             //рисуем сам видеобуфер+пространство справа
-                input_buffer = &graphics_buffer[(y - graphics_buffer_shift_y) * graphics_buffer_width];
-
-                const uint8_t* input_buffer_end = input_buffer + graphics_buffer_width;
-
-                if (graphics_buffer_shift_x < 0) input_buffer -= graphics_buffer_shift_x;
+                input_buffer = &graphics_buffer[(y - shift_y) * graphics_buffer_width];
+                register uint8_t* input_buffer_end = input_buffer + graphics_buffer_width;
+                if (shift_x < 0) input_buffer -= shift_x;
 
                 while (activ_buf_end > output_buffer) {
                     if (input_buffer < input_buffer_end) {
-                        uint8_t i_color = *input_buffer++;
+                        register uint8_t i_color = *input_buffer++;
                         i_color = ((i_color & 0xf0) == 0xf0) ? 255 : i_color;
                         *output_buffer++ = i_color;
                     }
@@ -229,18 +225,18 @@ static void __scratch_y("hdmi_driver") dma_handler_HDMI() {
             case TEXTMODE_DEFAULT:
             case TEXTMODE_53x30: {
                 *output_buffer++ = 255;
-
+                register uint8_t* tb = text_buffer;
+                register uint8_t* p = textmode_palette;
+                register uint8_t* f = font_6x8;
                 for (int x = 0; x < TEXTMODE_COLS; x++) {
-                    const uint16_t offset = (y / 8) * (TEXTMODE_COLS * 2) + x * 2;
-                    const uint8_t c = text_buffer[offset];
-                    const uint8_t colorIndex = text_buffer[offset + 1];
-                    uint8_t glyph_row = font_6x8[c * 8 + y % 8];
-
+                    register uint8_t* tbo = tb + (y / 8) * (TEXTMODE_COLS * 2) + x * 2;
+                    const uint8_t c = *tbo++;
+                    const uint8_t colorIndex = *tbo;
+                    register uint8_t glyph_row = f[c * 8 + y % 8];
                     for (int bit = 6; bit--;) {
                         *output_buffer++ = glyph_row & 1
-                                               ? textmode_palette[colorIndex & 0xf] //цвет шрифта
-                                               : textmode_palette[colorIndex >> 4]; //цвет фона
-
+                                               ? p[colorIndex & 0xf] //цвет шрифта
+                                               : p[colorIndex >> 4]; //цвет фона
                         glyph_row >>= 1;
                     }
                 }
@@ -538,12 +534,12 @@ static inline bool hdmi_init() {
     return true;
 };
 //выбор видеорежима
-void graphics_set_mode(enum graphics_mode_t mode) {
+void hdmi_graphics_set_mode(enum graphics_mode_t mode) {
     graphics_mode = mode;
     clrScr(0);
 };
 
-void graphics_set_palette(uint8_t i, uint32_t color888) {
+void hdmi_graphics_set_palette(uint8_t i, uint32_t color888) {
     palette[i] = color888 & 0x00ffffff;
 
 
@@ -557,15 +553,8 @@ void graphics_set_palette(uint8_t i, uint32_t color888) {
     conv_color64[i * 2 + 1] = conv_color64[i * 2] ^ 0x0003ffffffffffffl;
 };
 
-void graphics_set_buffer(uint8_t* buffer, uint16_t width, uint16_t height) {
-    graphics_buffer = buffer;
-    graphics_buffer_width = width;
-    graphics_buffer_height = height;
-};
-
-
 //выделение и настройка общих ресурсов - 4 DMA канала, PIO программ и 2 SM
-void graphics_init() {
+void hdmi_graphics_init() {
     //настройка PIO
     SM_video = pio_claim_unused_sm(PIO_VIDEO, true);
     SM_conv = pio_claim_unused_sm(PIO_VIDEO_ADDR, true);
@@ -595,24 +584,4 @@ void graphics_init() {
     graphics_set_palette(215, RGB888(0xFF, 0xFF, 0xFF)); //white
 
     hdmi_init();
-}
-
-void graphics_set_bgcolor(uint32_t color888) //определяем зарезервированный цвет в палитре
-{
-    graphics_set_palette(255, color888);
-};
-
-void graphics_set_offset(int x, int y) {
-    graphics_buffer_shift_x = x;
-    graphics_buffer_shift_y = y;
-};
-
-void graphics_set_textbuffer(uint8_t* buffer) {
-    text_buffer = buffer;
-};
-
-
-void clrScr(const uint8_t color) {
-    if (text_buffer)
-        memset(text_buffer, color, TEXTMODE_COLS * TEXTMODE_ROWS * 2);
 }

@@ -16,10 +16,10 @@ cmake_minimum_required(VERSION 3.13)
 set(PICO_BOARD_HEADER_DIRS ${CMAKE_CURRENT_LIST_DIR}/boards )
 #set(PICO_PLATFORM "rp2350" CACHE STRING "Chip type")
 set(PICO_PLATFORM "rp2040" CACHE STRING "Chip type")
-#set(PICO_BOARD "murmulator" CACHE STRING "Board type")
+set(PICO_BOARD "murmulator" CACHE STRING "Board type")
 #set(PICO_BOARD "murmulator2" CACHE STRING "Board type")
 #set(PICO_BOARD "rp2040pizero" CACHE STRING "Board type")
-set(PICO_BOARD "olimex-pico-pc" CACHE STRING "Board type")
+#set(PICO_BOARD "olimex-pico-pc" CACHE STRING "Board type")
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
@@ -29,6 +29,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 include(pico_sdk_import.cmake)
 
 project(nes C CXX ASM)
+
+set(PICO_PROGRAM_VERSION_STRING "305")
 
 option(I2S "Enable I2S sound" OFF)
 option(I2S_CS4334 "Enable I2S CS4334 sound" OFF)
@@ -196,7 +198,7 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
         # NES Gamepad
         USE_NESPAD
 
-        PICO_PROGRAM_VERSION_STRING="304"
+        PICO_PROGRAM_VERSION_STRING="${PICO_PROGRAM_VERSION_STRING}"
 )
 
 IF(TFT)
@@ -213,9 +215,11 @@ IF(TFT)
         SET(BUILD_NAME "${BUILD_NAME}-ST7789")
     ENDIF()
 ELSEIF(HDMI)
+    target_link_libraries(${PROJECT_NAME} PRIVATE vga-nextgen)
     target_link_libraries(${PROJECT_NAME} PRIVATE hdmi)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE VGA)
     target_compile_definitions(${PROJECT_NAME} PRIVATE HDMI)
-    SET(BUILD_NAME "${BUILD_NAME}-HDMI")
+    SET(BUILD_NAME "${BUILD_NAME}-VGA-HDMI")
 ELSEIF(TV)
     target_compile_definitions(${PROJECT_NAME} PRIVATE TV)
     target_link_libraries(${PROJECT_NAME} PRIVATE tv)
@@ -240,5 +244,5 @@ ELSE()
     SET(BUILD_NAME "${BUILD_NAME}-I2S-TDA1387")
 ENDIF()
 
-set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "${BUILD_NAME}")
+set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "${BUILD_NAME}-${PICO_PROGRAM_VERSION_STRING}")
 
