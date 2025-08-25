@@ -184,7 +184,6 @@ static void __scratch_y("hdmi_driver") dma_handler_HDMI() {
 
     if (graphics_buffer && line < 480 ) {
         //область изображения
-        register uint8_t* input_buffer = &graphics_buffer[(line / 2) * graphics_buffer_width];
         register uint8_t* output_buffer = activ_buf + 72; //для выравнивания синхры;
         register int y = line / 2;
         register int shift_x = graphics_buffer_shift_x;
@@ -206,7 +205,7 @@ static void __scratch_y("hdmi_driver") dma_handler_HDMI() {
                 }
 
             //рисуем сам видеобуфер+пространство справа
-                input_buffer = &graphics_buffer[(y - shift_y) * graphics_buffer_width];
+                register uint8_t* input_buffer = &graphics_buffer[(y - shift_y) * graphics_buffer_width];
                 register uint8_t* input_buffer_end = input_buffer + graphics_buffer_width;
                 if (shift_x < 0) input_buffer -= shift_x;
 
@@ -228,12 +227,12 @@ static void __scratch_y("hdmi_driver") dma_handler_HDMI() {
                 register uint8_t* tb = text_buffer;
                 register uint8_t* p = textmode_palette;
                 register uint8_t* f = font_6x8;
-                for (int x = 0; x < TEXTMODE_COLS; x++) {
-                    register uint8_t* tbo = tb + (y / 8) * (TEXTMODE_COLS * 2) + x * 2;
-                    const uint8_t c = *tbo++;
-                    const uint8_t colorIndex = *tbo;
-                    register uint8_t glyph_row = f[c * 8 + y % 8];
-                    for (int bit = 6; bit--;) {
+                for (register int x2 = 0; x2 < TEXTMODE_COLS * 2; x2 += 2) {
+                    register uint8_t* tbo = tb + (y >> 3) * (TEXTMODE_COLS * 2) + x2;
+                    register uint8_t c = *tbo++;
+                    register uint8_t colorIndex = *tbo;
+                    register uint8_t glyph_row = f[(c << 3) + (y & 0b111)];
+                    for (register int bit = 6; bit--;) {
                         *output_buffer++ = glyph_row & 1
                                                ? p[colorIndex & 0xf] //цвет шрифта
                                                : p[colorIndex >> 4]; //цвет фона
@@ -243,13 +242,15 @@ static void __scratch_y("hdmi_driver") dma_handler_HDMI() {
                 *output_buffer = 255;
                 break;
             }
-            default:
+            default: {
+                register uint8_t* input_buffer = &graphics_buffer[(line / 2) * SCREEN_WIDTH];
                 for (int i = SCREEN_WIDTH; i--;) {
                     uint8_t i_color = *input_buffer++;
                     i_color = (i_color & 0xf0) == 0xf0 ? 255 : i_color;
                     *output_buffer++ = i_color;
                 }
                 break;
+            }
         }
 
 
