@@ -1,6 +1,8 @@
 // Copyright 2020, Ryan Wendland, usb64
 // SPDX-License-Identifier: MIT
 
+#include <pico.h>
+
 #include "tusb_option.h"
 
 #if (TUSB_OPT_HOST_ENABLED && CFG_TUH_XINPUT)
