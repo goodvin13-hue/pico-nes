@@ -1,8 +1,6 @@
 // Copyright 2020, Ryan Wendland, usb64
 // SPDX-License-Identifier: MIT
 
-#include <pico.h>
-
 #include "tusb_option.h"
 
 #if (TUSB_OPT_HOST_ENABLED && CFG_TUH_XINPUT)
@@ -247,10 +245,14 @@ bool tuh_xinput_set_rumble(uint8_t dev_addr, uint8_t instance, uint8_t lValue, u
 //--------------------------------------------------------------------+
 // USBH API
 //--------------------------------------------------------------------+
-void xinputh_init(void)
+
+// ================= ВИПРАВЛЕНА ФУНКЦІЯ ІНІЦІАЛІЗАЦІЇ =================
+bool xinputh_init(void)                                        // Змінили тип функції на bool (щоб відповідала новим стандартам TinyUSB)
 {
-    tu_memclr(_xinputh_dev, sizeof(_xinputh_dev));
+    tu_memclr(_xinputh_dev, sizeof(_xinputh_dev));             // Очищаємо пам'ять структур драйвера
+    return true;                                               // ДОДАЛИ ЦЕЙ РЯДОК: повідомляємо системі, що драйвер запустився успішно
 }
+// ====================================================================
 
 bool xinputh_open(uint8_t rhport, uint8_t dev_addr, tusb_desc_interface_t const *desc_itf, uint16_t max_len)
 {
@@ -631,7 +633,5 @@ usbh_class_driver_t const usbh_xinput_driver =
     .xfer_cb    = xinputh_xfer_cb,
     .close      = xinputh_close
 };
-
-
 
 #endif
