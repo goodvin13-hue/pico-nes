@@ -11,29 +11,31 @@
 #include <hardware/sync.h>
 #include <hardware/flash.h>
 
-#include "main.h"
-
 #include <InfoNES.h>
 #include <InfoNES_System.h>
 #include <bsp/board_api.h>
 
 #include "InfoNES_Mapper.h"
-
 #include "graphics.h"
-
 #include "audio.h"
 #include "ff.h"
 
 #if USE_PS2_KBD
-
 #include "ps2kbd_mrmltr.h"
-
 #endif
-#if USE_NESPAD
 
-#include "nespad.h"
+// ================= ПОЧАТОК НАШОГО КОДУ ДЛЯ КНОПОК =================
+#include "hardware/gpio.h"                             // Підключаємо апаратну бібліотеку Pico для керування ніжками мікроконтролера (GPIO)
 
-#endif
+#define PIN_A 14                                       // Призначаємо макрос PIN_A для фізичної ніжки GP14
+#define PIN_B 15                                       // Призначаємо макрос PIN_B для фізичної ніжки GP15
+#define PIN_SELECT 16                                  // Призначаємо макрос PIN_SELECT для фізичної ніжки GP16
+#define PIN_START 26                                   // Призначаємо макрос PIN_START для фізичної ніжки GP26
+#define PIN_UP 27                                      // Призначаємо макрос PIN_UP для фізичної ніжки GP27
+#define PIN_DOWN 28                                    // Призначаємо макрос PIN_DOWN для фізичної ніжки GP28
+#define PIN_LEFT 29                                    // Призначаємо макрос PIN_LEFT для фізичної ніжки GP29
+#define PIN_RIGHT 7                                    // Призначаємо макрос PIN_RIGHT для фізичної ніжки GP7
+// ==================================================================
 
 #pragma GCC optimize("Ofast")
 
@@ -58,44 +60,49 @@ uint8_t CURSOR_X, CURSOR_Y = 0;
 uint8_t manager_started = false;
 
 enum menu_type_e {
-    NONE,
-    INT,
-    TEXT,
-    ARRAY,
-    SAVE,
-    LOAD,
-    RESET,
-    RETURN,
-    ROM_SELECT,
-    USB_DEVICE
+    NONE, INT, TEXT, ARRAY, SAVE, LOAD, RESET, RETURN, ROM_SELECT, USB_DEVICE
 };
 
 struct semaphore vga_start_semaphore;
-uint8_t SCREEN[NES_DISP_HEIGHT][NES_DISP_WIDTH]; // 61440 bytes
+uint8_t SCREEN[NES_DISP_HEIGHT][NES_DISP_WIDTH]; 
 uint16_t linebuffer[256];
 
+enum PALETTES {
+    RGB333, RBG222,
+};
+
+enum INPUT {
+    KEYBOARD, GAMEPAD1, GAMEPAD2,
+};
+
+typedef struct __attribute__((__packed__)) {
+    uint8_t version;
+    bool show_fps;
+    bool flash_line;
+    bool flash_frame;
+    PALETTES palette;
+    uint8_t snd_vol;
+    INPUT player_1_input;
+    INPUT player_2_input;
+    uint8_t nes_palette;
+} SETTINGS;
+
 SETTINGS settings = {
-    .version = 3,
+    .version = 2,
     .show_fps = false,
     .flash_line = true,
     .flash_frame = true,
     .palette = RGB333,
-    .snd_vol = 4,
-    .player_1_input = COMBINED,
-    .player_2_input = GAMEPAD1,
+    .snd_vol = 8,
+    .player_1_input = GAMEPAD1,
+    .player_2_input = KEYBOARD,
     .nes_palette = 0,
-    .swap_ab = false,
 };
 
 static FATFS fs, fs1;
 
-FATFS* getFlashInDriveFATFSptr() {
-    return &fs1;
-}
-
-FATFS* getSDCardFATFSptr() {
-    return &fs;
-}
+FATFS* getFlashInDriveFATFSptr() { return &fs1; }
+FATFS* getSDCardFATFSptr() { return &fs; }
 
 i2s_config_t i2s_config;
 
@@ -111,154 +118,39 @@ const BYTE NesPalette[64] = {
 };
 
 const int __not_in_flash_func(NesPalette888)[] = {
-    /**/
-    RGB888(0x7c, 0x7c, 0x7c),
-    RGB888(0x00, 0x00, 0xfc),
-    RGB888(0x00, 0x00, 0xbc),
-    RGB888(0x44, 0x28, 0xbc),
-
-    RGB888(0x94, 0x00, 0x84),
-    RGB888(0xa8, 0x00, 0x20),
-    RGB888(0xa8, 0x10, 0x00),
-    RGB888(0x88, 0x14, 0x00),
-
-    RGB888(0x50, 0x30, 0x00),
-    RGB888(0x00, 0x78, 0x00),
-    RGB888(0x00, 0x68, 0x00),
-    RGB888(0x00, 0x58, 0x00),
-
-    RGB888(0x00, 0x40, 0x58),
-    RGB888(0x00, 0x00, 0x00),
-    RGB888(0x00, 0x00, 0x00),
-    RGB888(0x00, 0x00, 0x00),
-
-    RGB888(0xbc, 0xbc, 0xbc),
-    RGB888(0x00, 0x78, 0xf8),
-    RGB888(0x00, 0x58, 0xf8),
-    RGB888(0x68, 0x44, 0xfc),
-
-    RGB888(0xd8, 0x00, 0xcc),
-    RGB888(0xe4, 0x00, 0x58),
-    RGB888(0xf8, 0x38, 0x00),
-    RGB888(0xe4, 0x5c, 0x10),
-
-    RGB888(0xac, 0x7c, 0x00),
-    RGB888(0x00, 0xb8, 0x00),
-    RGB888(0x00, 0xa8, 0x00),
-    RGB888(0x00, 0xa8, 0x44),
-
-    RGB888(0x00, 0x88, 0x88),
-    RGB888(0x00, 0x00, 0x00),
-    RGB888(0x00, 0x00, 0x00),
-    RGB888(0x00, 0x00, 0x00),
-
-    RGB888(0xf8, 0xf8, 0xf8),
-    RGB888(0x3c, 0xbc, 0xfc),
-    RGB888(0x68, 0x88, 0xfc),
-    RGB888(0x98, 0x78, 0xf8),
-
-    RGB888(0xf8, 0x78, 0xf8),
-    RGB888(0xf8, 0x58, 0x98),
-    RGB888(0xf8, 0x78, 0x58),
-    RGB888(0xfc, 0xa0, 0x44),
-
-    RGB888(0xf8, 0xb8, 0x00),
-    RGB888(0xb8, 0xf8, 0x18),
-    RGB888(0x58, 0xd8, 0x54),
-    RGB888(0x58, 0xf8, 0x98),
-
-    RGB888(0x00, 0xe8, 0xd8),
-    RGB888(0x78, 0x78, 0x78),
-    RGB888(0x00, 0x00, 0x00),
-    RGB888(0x00, 0x00, 0x00),
-
-    RGB888(0xfc, 0xfc, 0xfc),
-    RGB888(0xa4, 0xe4, 0xfc),
-    RGB888(0xb8, 0xb8, 0xf8),
-    RGB888(0xd8, 0xb8, 0xf8),
-
-    RGB888(0xf8, 0xb8, 0xf8),
-    RGB888(0xf8, 0xa4, 0xc0),
-    RGB888(0xf0, 0xd0, 0xb0),
-    RGB888(0xfc, 0xe0, 0xa8),
-
-    RGB888(0xf8, 0xd8, 0x78),
-    RGB888(0xd8, 0xf8, 0x78),
-    RGB888(0xb8, 0xf8, 0xb8),
-    RGB888(0xb8, 0xf8, 0xd8),
-
-    RGB888(0x00, 0xfc, 0xfc),
-    RGB888(0xf8, 0xd8, 0xf8),
-    RGB888(0x00, 0x00, 0x00),
-    RGB888(0x00, 0x00, 0x00),
-    /**/
+    RGB888(0x7c, 0x7c, 0x7c), RGB888(0x00, 0x00, 0xfc), RGB888(0x00, 0x00, 0xbc), RGB888(0x44, 0x28, 0xbc),
+    RGB888(0x94, 0x00, 0x84), RGB888(0xa8, 0x00, 0x20), RGB888(0xa8, 0x10, 0x00), RGB888(0x88, 0x14, 0x00),
+    RGB888(0x50, 0x30, 0x00), RGB888(0x00, 0x78, 0x00), RGB888(0x00, 0x68, 0x00), RGB888(0x00, 0x58, 0x00),
+    RGB888(0x00, 0x40, 0x58), RGB888(0x00, 0x00, 0x00), RGB888(0x00, 0x00, 0x00), RGB888(0x00, 0x00, 0x00),
+    RGB888(0xbc, 0xbc, 0xbc), RGB888(0x00, 0x78, 0xf8), RGB888(0x00, 0x58, 0xf8), RGB888(0x68, 0x44, 0xfc),
+    RGB888(0xd8, 0x00, 0xcc), RGB888(0xe4, 0x00, 0x58), RGB888(0xf8, 0x38, 0x00), RGB888(0xe4, 0x5c, 0x10),
+    RGB888(0xac, 0x7c, 0x00), RGB888(0x00, 0xb8, 0x00), RGB888(0x00, 0xa8, 0x00), RGB888(0x00, 0xa8, 0x44),
+    RGB888(0x00, 0x88, 0x88), RGB888(0x00, 0x00, 0x00), RGB888(0x00, 0x00, 0x00), RGB888(0x00, 0x00, 0x00),
+    RGB888(0xf8, 0xf8, 0xf8), RGB888(0x3c, 0xbc, 0xfc), RGB888(0x68, 0x88, 0xfc), RGB888(0x98, 0x78, 0xf8),
+    RGB888(0xf8, 0x78, 0xf8), RGB888(0xf8, 0x58, 0x98), RGB888(0xf8, 0x78, 0x58), RGB888(0xfc, 0xa0, 0x44),
+    RGB888(0xf8, 0xb8, 0x00), RGB888(0xb8, 0xf8, 0x18), RGB888(0x58, 0xd8, 0x54), RGB888(0x58, 0xf8, 0x98),
+    RGB888(0x00, 0xe8, 0xd8), RGB888(0x78, 0x78, 0x78), RGB888(0x00, 0x00, 0x00), RGB888(0x00, 0x00, 0x00),
+    RGB888(0xfc, 0xfc, 0xfc), RGB888(0xa4, 0xe4, 0xfc), RGB888(0xb8, 0xb8, 0xf8), RGB888(0xd8, 0xb8, 0xf8),
+    RGB888(0xf8, 0xb8, 0xf8), RGB888(0xf8, 0xa4, 0xc0), RGB888(0xf0, 0xd0, 0xb0), RGB888(0xfc, 0xe0, 0xa8),
+    RGB888(0xf8, 0xd8, 0x78), RGB888(0xd8, 0xf8, 0x78), RGB888(0xb8, 0xf8, 0xb8), RGB888(0xb8, 0xf8, 0xd8),
+    RGB888(0x00, 0xfc, 0xfc), RGB888(0xf8, 0xd8, 0xf8), RGB888(0x00, 0x00, 0x00), RGB888(0x00, 0x00, 0x00),
     /* Matthew Conte's Palette */
-    /**/
-    RGB888(0x80, 0x80, 0x80),
-    RGB888(0x00, 0x00, 0xbb),
-    RGB888(0x37, 0x00, 0xbf),
-    RGB888(0x84, 0x00, 0xa6),
-    RGB888(0xbb, 0x00, 0x6a),
-    RGB888(0xb7, 0x00, 0x1e),
-    RGB888(0xb3, 0x00, 0x00),
-    RGB888(0x91, 0x26, 0x00),
-    RGB888(0x7b, 0x2b, 0x00),
-    RGB888(0x00, 0x3e, 0x00),
-    RGB888(0x00, 0x48, 0x0d),
-    RGB888(0x00, 0x3c, 0x22),
-    RGB888(0x00, 0x2f, 0x66),
-    RGB888(0x00, 0x00, 0x00),
-    RGB888(0x05, 0x05, 0x05),
-    RGB888(0x05, 0x05, 0x05),
-    RGB888(0xc8, 0xc8, 0xc8),
-    RGB888(0x00, 0x59, 0xff),
-    RGB888(0x44, 0x3c, 0xff),
-    RGB888(0xb7, 0x33, 0xcc),
-    RGB888(0xff, 0x33, 0xaa),
-    RGB888(0xff, 0x37, 0x5e),
-    RGB888(0xff, 0x37, 0x1a),
-    RGB888(0xd5, 0x4b, 0x00),
-    RGB888(0xc4, 0x62, 0x00),
-    RGB888(0x3c, 0x7b, 0x00),
-    RGB888(0x1e, 0x84, 0x15),
-    RGB888(0x00, 0x95, 0x66),
-    RGB888(0x00, 0x84, 0xc4),
-    RGB888(0x11, 0x11, 0x11),
-    RGB888(0x09, 0x09, 0x09),
-    RGB888(0x09, 0x09, 0x09),
-    RGB888(0xff, 0xff, 0xff),
-    RGB888(0x00, 0x95, 0xff),
-    RGB888(0x6f, 0x84, 0xff),
-    RGB888(0xd5, 0x6f, 0xff),
-    RGB888(0xff, 0x77, 0xcc),
-    RGB888(0xff, 0x6f, 0x99),
-    RGB888(0xff, 0x7b, 0x59),
-    RGB888(0xff, 0x91, 0x5f),
-    RGB888(0xff, 0xa2, 0x33),
-    RGB888(0xa6, 0xbf, 0x00),
-    RGB888(0x51, 0xd9, 0x6a),
-    RGB888(0x4d, 0xd5, 0xae),
-    RGB888(0x00, 0xd9, 0xff),
-    RGB888(0x66, 0x66, 0x66),
-    RGB888(0x0d, 0x0d, 0x0d),
-    RGB888(0x0d, 0x0d, 0x0d),
-    RGB888(0xff, 0xff, 0xff),
-    RGB888(0x84, 0xbf, 0xff),
-    RGB888(0xbb, 0xbb, 0xff),
-    RGB888(0xd0, 0xbb, 0xff),
-    RGB888(0xff, 0xbf, 0xea),
-    RGB888(0xff, 0xbf, 0xcc),
-    RGB888(0xff, 0xc4, 0xb7),
-    RGB888(0xff, 0xcc, 0xae),
-    RGB888(0xff, 0xd9, 0xa2),
-    RGB888(0xcc, 0xe1, 0x99),
-    RGB888(0xae, 0xee, 0xb7),
-    RGB888(0xaa, 0xf7, 0xee),
-    RGB888(0xb3, 0xee, 0xff),
-    RGB888(0xdd, 0xdd, 0xdd),
-    RGB888(0x11, 0x11, 0x11),
-    RGB888(0x11, 0x11, 0x11),
-    /**/
+    RGB888(0x80, 0x80, 0x80), RGB888(0x00, 0x00, 0xbb), RGB888(0x37, 0x00, 0xbf), RGB888(0x84, 0x00, 0xa6),
+    RGB888(0xbb, 0x00, 0x6a), RGB888(0xb7, 0x00, 0x1e), RGB888(0xb3, 0x00, 0x00), RGB888(0x91, 0x26, 0x00),
+    RGB888(0x7b, 0x2b, 0x00), RGB888(0x00, 0x3e, 0x00), RGB888(0x00, 0x48, 0x0d), RGB888(0x00, 0x3c, 0x22),
+    RGB888(0x00, 0x2f, 0x66), RGB888(0x00, 0x00, 0x00), RGB888(0x05, 0x05, 0x05), RGB888(0x05, 0x05, 0x05),
+    RGB888(0xc8, 0xc8, 0xc8), RGB888(0x00, 0x59, 0xff), RGB888(0x44, 0x3c, 0xff), RGB888(0xb7, 0x33, 0xcc),
+    RGB888(0xff, 0x33, 0xaa), RGB888(0xff, 0x37, 0x5e), RGB888(0xff, 0x37, 0x1a), RGB888(0xd5, 0x4b, 0x00),
+    RGB888(0xc4, 0x62, 0x00), RGB888(0x3c, 0x7b, 0x00), RGB888(0x1e, 0x84, 0x15), RGB888(0x00, 0x95, 0x66),
+    RGB888(0x00, 0x84, 0xc4), RGB888(0x11, 0x11, 0x11), RGB888(0x09, 0x09, 0x09), RGB888(0x09, 0x09, 0x09),
+    RGB888(0xff, 0xff, 0xff), RGB888(0x00, 0x95, 0xff), RGB888(0x6f, 0x84, 0xff), RGB888(0xd5, 0x6f, 0xff),
+    RGB888(0xff, 0x77, 0xcc), RGB888(0xff, 0x6f, 0x99), RGB888(0xff, 0x7b, 0x59), RGB888(0xff, 0x91, 0x5f),
+    RGB888(0xff, 0xa2, 0x33), RGB888(0xa6, 0xbf, 0x00), RGB888(0x51, 0xd9, 0x6a), RGB888(0x4d, 0xd5, 0xae),
+    RGB888(0x00, 0xd9, 0xff), RGB888(0x66, 0x66, 0x66), RGB888(0x0d, 0x0d, 0x0d), RGB888(0x0d, 0x0d, 0x0d),
+    RGB888(0xff, 0xff, 0xff), RGB888(0x84, 0xbf, 0xff), RGB888(0xbb, 0xbb, 0xff), RGB888(0xd0, 0xbb, 0xff),
+    RGB888(0xff, 0xbf, 0xea), RGB888(0xff, 0xbf, 0xcc), RGB888(0xff, 0xc4, 0xb7), RGB888(0xff, 0xcc, 0xae),
+    RGB888(0xff, 0xd9, 0xa2), RGB888(0xcc, 0xe1, 0x99), RGB888(0xae, 0xee, 0xb7), RGB888(0xaa, 0xf7, 0xee),
+    RGB888(0xb3, 0xee, 0xff), RGB888(0xdd, 0xdd, 0xdd), RGB888(0x11, 0x11, 0x11), RGB888(0x11, 0x11, 0x11),
 };
 
 void updatePalette(PALETTES palette) {
@@ -288,50 +180,36 @@ struct input_bits_t {
     bool left: true;
     bool up: true;
     bool down: true;
-    input_bits_t operator |(const input_bits_t& o) {
-        input_bits_t res = {
-            a      | o.a,
-            b      | o.b,
-            select | o.select,
-            start  | o.start,
-            right  | o.right,
-            left   | o.left,
-            up     | o.up,
-            down   | o.down
-        };
-        return res;
-    }
 };
 
 input_bits_t keyboard_bits = { false, false, false, false, false, false, false, false };
 input_bits_t gamepad1_bits = { false, false, false, false, false, false, false, false };
 static input_bits_t gamepad2_bits = { false, false, false, false, false, false, false, false };
 
-#if USE_NESPAD
 
-void nespad_tick() {
-    nespad_read();
+// ================= НАШ НОВИЙ ОБРОБНИК КНОПОК =================
+void nespad_tick() {                                           // Функція опитування кнопок (залишили стару назву, щоб не ламати ядро емулятора)
+    gamepad1_bits.a = !gpio_get(PIN_A);                        // Читаємо пін A (gpio_get дає 0 коли натиснуто на землю, знак оклику інвертує це в true)
+    gamepad1_bits.b = !gpio_get(PIN_B);                        // Читаємо пін B і передаємо статус в пам'ять емулятора
+    gamepad1_bits.select = !gpio_get(PIN_SELECT);              // Читаємо пін Select
+    gamepad1_bits.start = !gpio_get(PIN_START);                // Читаємо пін Start
+    gamepad1_bits.up = !gpio_get(PIN_UP);                      // Читаємо пін Вгору
+    gamepad1_bits.down = !gpio_get(PIN_DOWN);                  // Читаємо пін Вниз
+    gamepad1_bits.left = !gpio_get(PIN_LEFT);                  // Читаємо пін Вліво
+    gamepad1_bits.right = !gpio_get(PIN_RIGHT);                // Читаємо пін Вправо
 
-    gamepad1_bits.a = settings.swap_ab ? (nespad_state & DPAD_B) != 0 : (nespad_state & DPAD_A) != 0;
-    gamepad1_bits.b = settings.swap_ab ? (nespad_state & DPAD_A) != 0 : (nespad_state & DPAD_B) != 0;
-    gamepad1_bits.select = (nespad_state & DPAD_SELECT) != 0;
-    gamepad1_bits.start = (nespad_state & DPAD_START) != 0;
-    gamepad1_bits.up = (nespad_state & DPAD_UP) != 0;
-    gamepad1_bits.down = (nespad_state & DPAD_DOWN) != 0;
-    gamepad1_bits.left = (nespad_state & DPAD_LEFT) != 0;
-    gamepad1_bits.right = (nespad_state & DPAD_RIGHT) != 0;
-
-    // second
-    gamepad2_bits.a = settings.swap_ab ? (nespad_state2 & DPAD_B) != 0 : (nespad_state2 & DPAD_A) != 0;
-    gamepad2_bits.b = settings.swap_ab ? (nespad_state2 & DPAD_A) != 0 : (nespad_state2 & DPAD_B) != 0;
-    gamepad2_bits.select = (nespad_state2 & DPAD_SELECT) != 0;
-    gamepad2_bits.start = (nespad_state2 & DPAD_START) != 0;
-    gamepad2_bits.up = (nespad_state2 & DPAD_UP) != 0;
-    gamepad2_bits.down = (nespad_state2 & DPAD_DOWN) != 0;
-    gamepad2_bits.left = (nespad_state2 & DPAD_LEFT) != 0;
-    gamepad2_bits.right = (nespad_state2 & DPAD_RIGHT) != 0;
+    // Другого гравця у нас фізично немає, тому примусово зануляємо його кнопки, щоб він не глючив
+    gamepad2_bits.a = 0;                                       // Кнопка A другого гравця відключена
+    gamepad2_bits.b = 0;                                       // Кнопка B другого гравця відключена
+    gamepad2_bits.select = 0;                                  // Select відключено
+    gamepad2_bits.start = 0;                                   // Start відключено
+    gamepad2_bits.up = 0;                                      // Хрестовина відключена
+    gamepad2_bits.down = 0;                                    // Хрестовина відключена
+    gamepad2_bits.left = 0;                                    // Хрестовина відключена
+    gamepad2_bits.right = 0;                                   // Хрестовина відключена
 }
-#endif
+// ==================================================================
+
 
 #if USE_PS2_KBD
 static bool isInReport(hid_keyboard_report_t const* report, const unsigned char keycode) {
@@ -343,62 +221,22 @@ static bool isInReport(hid_keyboard_report_t const* report, const unsigned char 
     return false;
 }
 
-extern "C" {
-    volatile bool altPressed = false;
-    volatile bool ctrlPressed = false;
-    volatile uint8_t fxPressedV = 0;
-}
-
 void __not_in_flash_func(process_kbd_report)(hid_keyboard_report_t const* report,
                                              hid_keyboard_report_t const* prev_report) {
-    keyboard_bits.start = isInReport(report, HID_KEY_ENTER) || isInReport(report, HID_KEY_KEYPAD_ENTER);
-    keyboard_bits.select = isInReport(report, HID_KEY_BACKSPACE) || isInReport(report, HID_KEY_ESCAPE) || isInReport(report, HID_KEY_KEYPAD_ADD);
-    if (settings.swap_ab) {
-        keyboard_bits.b = isInReport(report, HID_KEY_Z) || isInReport(report, HID_KEY_O) || isInReport(report, HID_KEY_KEYPAD_0);
-        keyboard_bits.a = isInReport(report, HID_KEY_X) || isInReport(report, HID_KEY_P) || isInReport(report, HID_KEY_KEYPAD_DECIMAL);
-    } else {
-        keyboard_bits.a = isInReport(report, HID_KEY_Z) || isInReport(report, HID_KEY_O) || isInReport(report, HID_KEY_KEYPAD_0);
-        keyboard_bits.b = isInReport(report, HID_KEY_X) || isInReport(report, HID_KEY_P) || isInReport(report, HID_KEY_KEYPAD_DECIMAL);
-    }
-
-    bool b7 = isInReport(report, HID_KEY_KEYPAD_7);
-    bool b9 = isInReport(report, HID_KEY_KEYPAD_9);
-    bool b1 = isInReport(report, HID_KEY_KEYPAD_1);
-    bool b3 = isInReport(report, HID_KEY_KEYPAD_3);
-
-    keyboard_bits.up = b7 || b9 || isInReport(report, HID_KEY_ARROW_UP) || isInReport(report, HID_KEY_W) || isInReport(report, HID_KEY_KEYPAD_8);
-    keyboard_bits.down = b1 || b3 || isInReport(report, HID_KEY_ARROW_DOWN) || isInReport(report, HID_KEY_S) || isInReport(report, HID_KEY_KEYPAD_2) || isInReport(report, HID_KEY_KEYPAD_5);
-    keyboard_bits.left = b7 || b1 || isInReport(report, HID_KEY_ARROW_LEFT) || isInReport(report, HID_KEY_A) || isInReport(report, HID_KEY_KEYPAD_4);
-    keyboard_bits.right = b9 || b3 || isInReport(report, HID_KEY_ARROW_RIGHT)  || isInReport(report, HID_KEY_D) || isInReport(report, HID_KEY_KEYPAD_6);
-
-    altPressed = isInReport(report, HID_KEY_ALT_LEFT) || isInReport(report, HID_KEY_ALT_RIGHT);
-    ctrlPressed = isInReport(report, HID_KEY_CONTROL_LEFT) || isInReport(report, HID_KEY_CONTROL_RIGHT);
-    
-    if (altPressed && ctrlPressed && isInReport(report, HID_KEY_DELETE)) {
-        watchdog_enable(10, true);
-        while(true) {
-            tight_loop_contents();
-        }
-    }
-    if (ctrlPressed || altPressed) {
-        uint8_t fxPressed = 0;
-        if (isInReport(report, HID_KEY_F1)) fxPressed = 1;
-        else if (isInReport(report, HID_KEY_F2)) fxPressed = 2;
-        else if (isInReport(report, HID_KEY_F3)) fxPressed = 3;
-        else if (isInReport(report, HID_KEY_F4)) fxPressed = 4;
-        else if (isInReport(report, HID_KEY_F5)) fxPressed = 5;
-        else if (isInReport(report, HID_KEY_F6)) fxPressed = 6;
-        else if (isInReport(report, HID_KEY_F7)) fxPressed = 7;
-        else if (isInReport(report, HID_KEY_F8)) fxPressed = 8;
-        fxPressedV = fxPressed;
-    }
+    keyboard_bits.start = isInReport(report, HID_KEY_ENTER);
+    keyboard_bits.select = isInReport(report, HID_KEY_BACKSPACE);
+    keyboard_bits.a = isInReport(report, HID_KEY_Z);
+    keyboard_bits.b = isInReport(report, HID_KEY_X);
+    keyboard_bits.up = isInReport(report, HID_KEY_ARROW_UP);
+    keyboard_bits.down = isInReport(report, HID_KEY_ARROW_DOWN);
+    keyboard_bits.left = isInReport(report, HID_KEY_ARROW_LEFT);
+    keyboard_bits.right = isInReport(report, HID_KEY_ARROW_RIGHT);
 }
 
 Ps2Kbd_Mrmltr ps2kbd(
     pio1,
-    PS2KBD_GPIO_FIRST,
-    process_kbd_report
-);
+    0,
+    process_kbd_report);
 #endif
 
 inline bool checkNESMagic(const uint8_t* data) {
@@ -420,9 +258,6 @@ static int rapidFireMask = 0;
 static int rapidFireMask2 = 0;
 static int rapidFireCounter = 0;
 static int rapidFireCounter2 = 0;
-int save_slot = 0;
-bool load();
-bool save();
 
 void InfoNES_PadState(DWORD* pdwPad1, DWORD* pdwPad2, DWORD* pdwSystem) {
     static constexpr int LEFT = 1 << 6;
@@ -433,45 +268,28 @@ void InfoNES_PadState(DWORD* pdwPad1, DWORD* pdwPad2, DWORD* pdwSystem) {
     static constexpr int START = 1 << 3;
     static constexpr int A = 1 << 0;
     static constexpr int B = 1 << 1;
-
-    if (fxPressedV) {
-        if (altPressed) {
-            save_slot = fxPressedV;
-            load();
-        } else if (ctrlPressed) {
-            save_slot = fxPressedV;
-            save();
-        }
-    }
-
     input_bits_t player1_state = {};
     input_bits_t player2_state = {};
     switch (settings.player_1_input) {
-        case KEYBOARD:
+        case 0:
             player1_state = keyboard_bits;
             break;
-        case GAMEPAD1:
+        case 1:
             player1_state = gamepad1_bits;
             break;
-        case GAMEPAD2:
+        case 2:
             player1_state = gamepad2_bits;
-            break;
-        case COMBINED:
-            player1_state = keyboard_bits | gamepad1_bits;
             break;
     }
     switch (settings.player_2_input) {
-        case KEYBOARD:
+        case 0:
             player2_state = keyboard_bits;
             break;
-        case GAMEPAD1:
+        case 1:
             player2_state = gamepad1_bits;
             break;
-        case GAMEPAD2:
+        case 2:
             player2_state = gamepad2_bits;
-            break;
-        case COMBINED:
-            player2_state = keyboard_bits | gamepad1_bits;
             break;
     }
     int gamepad_state = (player1_state.left ? LEFT : 0) |
@@ -488,7 +306,6 @@ void InfoNES_PadState(DWORD* pdwPad1, DWORD* pdwPad2, DWORD* pdwSystem) {
     auto&dst = *pdwPad1;
     int rv = gamepad_state;
     if (rapidFireCounter & 2) {
-        // 15 fire/sec
         rv &= ~rapidFireMask;
     }
     dst = rv;
@@ -505,7 +322,6 @@ void InfoNES_PadState(DWORD* pdwPad1, DWORD* pdwPad2, DWORD* pdwSystem) {
     auto&dst2 = *pdwPad2;
     rv = gamepad_state;
     if (rapidFireCounter2 & 2) {
-        // 15 fire/sec
         rv &= ~rapidFireMask2;
     }
     dst2 = rv;
@@ -525,8 +341,6 @@ void InfoNES_Error(const char* pszMsg, ...) {
     printf("[Error]");
     va_list args;
     va_start(args, pszMsg);
-    // vsnprintf(ErrorMessage, ERRORMESSAGESIZE, pszMsg, args);
-    // printf("%s", ErrorMessage);
     va_end(args);
     printf("\n");
 }
@@ -576,7 +390,6 @@ void InfoNES_SoundClose() {
 #define buffermax ((44100 / 60)*2)
 int __not_in_flash_func(InfoNES_GetSoundBufferSize)() { return buffermax; }
 
-
 void InfoNES_SoundOutput(int samples, const BYTE* wave1, const BYTE* wave2, const BYTE* wave3, const BYTE* wave4,
                          const BYTE* wave5) {
     static int16_t samples_out[2][buffermax * 2];
@@ -613,10 +426,8 @@ void __not_in_flash_func(InfoNES_PreDrawLine)(int line) {
 
 void __not_in_flash_func(InfoNES_PostDrawLine)(int line) {
     for (int x = 0; x < NES_DISP_WIDTH; x++) SCREEN[line][x] = (uint8_t)linebuffer[x];
-    // if (settings.show_fps && line < 16) draw_fps(fps_text, line, 255);
 }
 
-/* Renderer loop on Pico's second core */
 void __scratch_x("render") render_core() {
     multicore_lockout_victim_init();
     graphics_init();
@@ -631,7 +442,6 @@ void __scratch_x("render") render_core() {
     graphics_set_flashmode(settings.flash_line, settings.flash_frame);
     sem_acquire_blocking(&vga_start_semaphore);
 
-    // 60 FPS loop
 #define frame_tick (16666)
     uint64_t tick = time_us_64();
 #ifdef TFT
@@ -646,38 +456,44 @@ void __scratch_x("render") render_core() {
         }
 #endif
         if (tick >= last_input_tick + frame_tick * 1) {
+#if USE_PS2_KBD
             ps2kbd.tick();
+#endif
             nespad_tick();
             last_input_tick = tick;
         }
         tick = time_us_64();
-
-
         tuh_task();
-        //hid_app_task();
         tight_loop_contents();
     }
-
     __unreachable();
 }
-
 
 bool filebrowser_loadfile(const char pathname[256]) {
     UINT bytes_read = 0;
     FIL file;
 
-    int window_y = (TEXTMODE_ROWS - 5) / 2;
-    int window_x = (TEXTMODE_COLS - 43) / 2;
+    constexpr int window_y = (TEXTMODE_ROWS - 5) / 2;
+    constexpr int window_x = (TEXTMODE_COLS - 43) / 2;
 
     draw_window("Loading firmware", window_x, window_y, 43, 5);
+
+    FILINFO fileinfo;
+    f_stat(pathname, &fileinfo);
+
+    if (16384 - 64 << 10 < fileinfo.fsize) {
+        draw_text("ERROR: ROM too large! Canceled!!", window_x + 1, window_y + 2, 13, 1);
+        sleep_ms(5000);
+        return false;
+    }
 
     draw_text("Loading...", window_x + 1, window_y + 2, 10, 1);
     sleep_ms(500);
 
-
     multicore_lockout_start_blocking();
     auto flash_target_offset = FLASH_TARGET_OFFSET + 4096;
-    uint32_t cnt = FLASH_SECTOR_SIZE;
+
+    flash_range_erase(flash_target_offset, fileinfo.fsize);
 
     if (FR_OK == f_open(&file, pathname, FA_READ)) {
         uint8_t buffer[FLASH_PAGE_SIZE];
@@ -687,12 +503,7 @@ bool filebrowser_loadfile(const char pathname[256]) {
 
             if (bytes_read) {
                 uint32_t ints = save_and_disable_interrupts();
-                if (cnt >= FLASH_SECTOR_SIZE) {
-                    flash_range_erase(flash_target_offset, FLASH_SECTOR_SIZE);
-                    cnt = 0;
-                }
                 flash_range_program(flash_target_offset, buffer, FLASH_PAGE_SIZE);
-                cnt += FLASH_PAGE_SIZE;
                 restore_interrupts(ints);
 
                 gpio_put(PICO_DEFAULT_LED_PIN, flash_target_offset >> 13 & 1);
@@ -706,14 +517,12 @@ bool filebrowser_loadfile(const char pathname[256]) {
     }
     f_close(&file);
     uint32_t ints = save_and_disable_interrupts();
-    flash_range_erase(FLASH_TARGET_OFFSET, FLASH_SECTOR_SIZE);
     flash_range_program(FLASH_TARGET_OFFSET, reinterpret_cast<const uint8_t *>(pathname), 256);
     restore_interrupts(ints);
 
     multicore_lockout_end_blocking();
     return true;
 }
-
 
 typedef struct __attribute__((__packed__)) {
     bool is_directory;
@@ -728,12 +537,10 @@ file_item_t* fileItems = (file_item_t *)(&SCREEN[0][0] + TEXTMODE_COLS * TEXTMOD
 int compareFileItems(const void* a, const void* b) {
     const auto* itemA = (file_item_t *)a;
     const auto* itemB = (file_item_t *)b;
-    // Directories come first
     if (itemA->is_directory && !itemB->is_directory)
         return -1;
     if (!itemA->is_directory && itemB->is_directory)
         return 1;
-    // Sort files alphabetically
     return strcmp(itemA->filename, itemB->filename);
 }
 
@@ -742,9 +549,9 @@ static inline bool isExecutable(const char pathname[256], const char* extensions
     if (extension == nullptr) {
         return false;
     }
-    extension++; // Move past the '.' character
+    extension++; 
 
-    const char* token = strtok((char *)extensions, "|"); // Tokenize the extensions string using '|'
+    const char* token = strtok((char *)extensions, "|"); 
 
     while (token != nullptr) {
         if (strcmp(extension, token) == 0) {
@@ -752,35 +559,7 @@ static inline bool isExecutable(const char pathname[256], const char* extensions
         }
         token = strtok(NULL, "|");
     }
-
     return false;
-}
-
-void save_config();
-
-bool is_start_locked() {
-    FIL fd;
-    char pathname[256];
-    sprintf(pathname, "%s\\pico-nes.lock", HOME_DIR);
-    bool res = FR_OK == f_open(&fd, pathname, FA_READ);
-    f_close(&fd);
-    return res;
-}
-
-void unlock_start() {
-    char pathname[256];
-    sprintf(pathname, "%s\\pico-nes.lock", HOME_DIR);
-    f_unlink(pathname);
-}
-
-void lock_start() {
-    FIL fd;
-    char pathname[256];
-    sprintf(pathname, "%s\\pico-nes.lock", HOME_DIR);
-    FRESULT fr = f_open(&fd, pathname, FA_CREATE_NEW | FA_WRITE);
-    UINT bw;
-    f_write(&fd, &settings, sizeof(settings), &bw);
-    f_close(&fd);
 }
 
 void filebrowser(const char pathname[256], const char* executables) {
@@ -793,6 +572,11 @@ void filebrowser(const char pathname[256], const char* executables) {
     DIR dir;
     FILINFO fileInfo;
 
+    if (FR_OK != f_mount(&fs, "SD", 1)) {
+        draw_text("SD Card not inserted or SD Card error!", 0, 0, 12, 0);
+        while (true);
+    }
+
     while (true) {
         memset(fileItems, 0, sizeof(file_item_t) * max_files);
         int total_files = 0;
@@ -800,26 +584,6 @@ void filebrowser(const char pathname[256], const char* executables) {
         snprintf(tmp, TEXTMODE_COLS, "SD:\\%s", basepath);
         draw_window(tmp, 0, 0, TEXTMODE_COLS, TEXTMODE_ROWS - 1);
         memset(tmp, ' ', TEXTMODE_COLS);
-
-#ifndef TFT
-        draw_text(tmp, 0, 29, 0, 0);
-        auto off = 0;
-        draw_text("START", off, 29, 7, 0);
-        off += 5;
-        draw_text(" Run at cursor ", off, 29, 0, 3);
-        off += 16;
-        draw_text("SELECT", off, 29, 7, 0);
-        off += 6;
-        draw_text(" Run previous  ", off, 29, 0, 3);
-        off += 16;
-        draw_text("ARROWS", off, 29, 7, 0);
-        off += 6;
-        draw_text(" Navigation    ", off, 29, 0, 3);
-        off += 16;
-        draw_text("A/F10", off, 29, 7, 0);
-        off += 5;
-        draw_text(" USB DRV ", off, 29, 0, 3);
-#endif
 
         if (FR_OK != f_opendir(&dir, basepath)) {
             draw_text("Failed to open directory", 1, 1, 4, 0);
@@ -837,11 +601,9 @@ void filebrowser(const char pathname[256], const char* executables) {
                fileInfo.fname[0] != '\0' &&
                total_files < max_files
         ) {
-            // Set the file item properties
             fileItems[total_files].is_directory = fileInfo.fattrib & AM_DIR;
-            size_t sz = fileInfo.fsize >> 10;
-            fileItems[total_files].size = sz;
-            fileItems[total_files].is_executable = sz < ((3ul << 10) - 4) ? isExecutable(fileInfo.fname, executables) : false;
+            fileItems[total_files].size = fileInfo.fsize;
+            fileItems[total_files].is_executable = isExecutable(fileInfo.fname, executables);
             strncpy(fileItems[total_files].filename, fileInfo.fname, 78);
             total_files++;
         }
@@ -863,35 +625,9 @@ void filebrowser(const char pathname[256], const char* executables) {
                 debounce = !gamepad1_bits.start && !keyboard_bits.start;
             }
 
-            // ESCAPE
             if (gamepad1_bits.select || keyboard_bits.select) {
                 return;
             }
-
-            /*
-            // F10
-            if (nespad_state & DPAD_A || input == 0x44) {
-                constexpr int window_x = (TEXTMODE_COLS - 40) / 2;
-                constexpr int window_y = (TEXTMODE_ROWS - 4) / 2;
-                draw_window("SD Cardreader mode ", window_x, window_y, 40, 4);
-                draw_text("Mounting SD Card. Use safe eject ", window_x + 1, window_y + 1, 13, 1);
-                draw_text("to conitinue...", window_x + 1, window_y + 2, 13, 1);
-
-                sleep_ms(500);
-
-                init_pico_usb_drive();
-
-                while (!tud_msc_ejected()) {
-                    pico_usb_drive_heartbeat();
-                }
-
-                int post_cicles = 1000;
-                while (--post_cicles) {
-                    sleep_ms(1);
-                    pico_usb_drive_heartbeat();
-                }
-            }
-            */
 
             if (gamepad1_bits.down || keyboard_bits.down) {
                 if (offset + (current_item + 1) < total_files) {
@@ -950,11 +686,9 @@ void filebrowser(const char pathname[256], const char* executables) {
 
                 if (file_at_cursor.is_executable) {
                     sprintf(tmp, "%s\\%s", basepath, file_at_cursor.filename);
+
                     if (filebrowser_loadfile(tmp)) {
-                        save_config();
-                        unlock_start();
                         watchdog_enable(0, true);
-                        // FIXME!!!
                         return;
                     }
                 }
@@ -971,14 +705,14 @@ void filebrowser(const char pathname[256], const char* executables) {
                     memset(tmp, 0xCD, TEXTMODE_COLS - 2);
                     tmp[TEXTMODE_COLS - 2] = '\0';
                     draw_text(tmp, 1, per_page + 1, 11, 1);
-                    snprintf(tmp, TEXTMODE_COLS - 2, " Size: %dKb, File %lu of %d ", item.size, offset + i + 1, total_files);
+                    snprintf(tmp, TEXTMODE_COLS - 2, " Size: %iKb, File %lu of %i ", item.size / 1024, offset + i + 1,
+                             total_files);
                     draw_text(tmp, 2, per_page + 1, 14, 3);
                 }
 
                 const auto len = strlen(item.filename);
                 color = item.is_directory ? 15 : color;
                 color = item.is_executable ? 10 : color;
-                //color = strstr((char *)rom_filename, item.filename) != nullptr ? 13 : color;
                 memset(tmp, ' ', TEXTMODE_COLS - 2);
                 tmp[TEXTMODE_COLS - 2] = '\0';
                 memcpy(&tmp, item.filename, len < TEXTMODE_COLS - 2 ? len : TEXTMODE_COLS - 2);
@@ -993,11 +727,11 @@ int menu();
 int InfoNES_Video() {
     if (!parseROM(reinterpret_cast<const uint8_t *>(rom))) {
         menu();
-        return 0; // TODO: 1?
+        return 0; 
     }
     if (InfoNES_Reset() < 0) {
         menu();
-        return 1; // TODO: ?
+        return 1; 
     }
     graphics_set_mode(GRAPHICSMODE_DEFAULT);
     return 0;
@@ -1012,9 +746,10 @@ int InfoNES_Menu() {
 
 void load_config() {
     char pathname[256];
-    sprintf(pathname, "%s\\pico-nes.cfg", HOME_DIR);
+    sprintf(pathname, "%s\\emulator.cfg", "NES");
+    FRESULT fr = f_mount(&fs, "", 1);
     FIL fd;
-    FRESULT fr = f_open(&fd, pathname, FA_READ);
+    fr = f_open(&fd, pathname, FA_READ);
     if (fr != FR_OK) {
         return;
     }
@@ -1025,12 +760,17 @@ void load_config() {
 
 void save_config() {
     char pathname[256];
-    sprintf(pathname, "%s\\pico-nes.cfg", HOME_DIR);
-    FIL fd;
-    FRESULT fr = f_open(&fd, pathname, FA_CREATE_ALWAYS | FA_WRITE);
-    UINT bw;
-    f_write(&fd, &settings, sizeof(settings), &bw);
-    f_close(&fd);
+    sprintf(pathname, "%s\\emulator.cfg", "NES");
+    FRESULT fr = f_mount(&fs, "", 1);
+    if (FR_OK != fr) {
+        FIL fd;
+        fr = f_open(&fd, pathname, FA_CREATE_ALWAYS | FA_WRITE);
+        if (FR_OK != fr) {
+            UINT bw;
+            f_write(&fd, &settings, sizeof(settings), &bw);
+            f_close(&fd);
+        }
+    }
 }
 
 typedef bool (*menu_callback_t)();
@@ -1044,70 +784,37 @@ typedef struct __attribute__((__packed__)) {
     char value_list[15][10];
 } MenuItem;
 
-#if SOFTTV
-typedef struct tv_out_mode_t {
-    // double color_freq;
-    float color_index;
-    COLOR_FREQ_t c_freq;
-    enum graphics_mode_t mode_bpp;
-    g_out_TV_t tv_system;
-    NUM_TV_LINES_t N_lines;
-    bool cb_sync_PI_shift_lines;
-    bool cb_sync_PI_shift_half_frame;
-} tv_out_mode_t;
-extern tv_out_mode_t tv_out_mode;
-#endif
+int save_slot = 0;
 
 bool save() {
     char pathname[255];
-
     if (save_slot) {
         sprintf(pathname, "%s_%d", rom_filename, save_slot);
     }
     else {
         sprintf(pathname, "%s", rom_filename);
     }
-
     save_state(pathname);
     return true;
 }
 
 bool load() {
     char pathname[255];
-
     if (save_slot) {
         sprintf(pathname, "%s_%d", rom_filename, save_slot);
     }
     else {
         sprintf(pathname, "%s", rom_filename);
     }
-
     load_state(pathname);
     return true;
 }
 
-
 const MenuItem menu_items[] = {
-    { "Player 1: %s", ARRAY, &settings.player_1_input, nullptr, 3, { "Keyboard ", "Gamepad 1", "Gamepad 2", "Combined " } },
+    { "Player 1: %s", ARRAY, &settings.player_1_input, nullptr, 2, { "Keyboard ", "Gamepad 1", "Gamepad 2" } },
     { "Player 2: %s", ARRAY, &settings.player_2_input, nullptr, 2, { "Keyboard ", "Gamepad 1", "Gamepad 2" } },
-    { "Swap AB <> BA: %s", ARRAY, &settings.swap_ab, nullptr, 1, {"NO ", "YES"} },
     { "" },
     { "Volume: %d", INT, &settings.snd_vol, nullptr, 8 },
-#if VGA
-{ "" },
-    { "Flash line: %s", ARRAY, &settings.flash_line, nullptr,1, { "NO ", "YES" } },
-    { "Flash frame: %s", ARRAY, &settings.flash_frame, nullptr,1, { "NO ", "YES" } },
-    { "VGA Mode: %s", ARRAY, &settings.palette, nullptr,1, { "RGB333", "RGB222" } },
-#endif
-#if SOFTTV
-    { "" },
-    { "TV system %s", ARRAY, &tv_out_mode.tv_system, nullptr, 1, { "PAL ", "NTSC" } },
-    { "TV Lines %s", ARRAY, &tv_out_mode.N_lines, nullptr, 3, { "624", "625", "524", "525" } },
-    { "Freq %s", ARRAY, &tv_out_mode.c_freq, nullptr, 1, { "3.579545", "4.433619" } },
-    { "Color %s", ARRAY, &tv_out_mode.color_index, nullptr, 1, { "BW   ", "COLOR" } },
-    { "Shift lines %s", ARRAY, &tv_out_mode.cb_sync_PI_shift_lines, nullptr, 1, { "NO ", "YES" } },
-    { "Shift half frame %s", ARRAY, &tv_out_mode.cb_sync_PI_shift_half_frame, nullptr, 1, { "NO ", "YES" } },
-#endif
     { "" },
     { "NES Palette: %s", ARRAY, &settings.nes_palette, nullptr, 1, { "Default ", "Colorful" } },
     { "" },
@@ -1183,11 +890,9 @@ int menu() {
                         break;
                     case RESET:
                         if (gamepad1_bits.start || keyboard_bits.start)
-                        watchdog_enable(10, true);
-                        while(true) {
-                            tight_loop_contents();
-                        }
+                            watchdog_enable(100, true);
                         break;
+
                     case ROM_SELECT:
                         if (gamepad1_bits.start || keyboard_bits.start) {
                             exit = true;
@@ -1198,8 +903,7 @@ int menu() {
                         if (gamepad1_bits.start || keyboard_bits.start) {
                             clrScr(1);
                             draw_text((char *)"Mount me as USB drive...", 30, 15, 7, 1);
-                            // in_flash_drive();
-                            watchdog_enable(10, true);
+                            watchdog_enable(100, true);
                             exit = true;
                         }
                 }
@@ -1207,7 +911,7 @@ int menu() {
                     exit = item->callback();
                 }
             }
-            static char result[80];
+            static char result[TEXTMODE_COLS];
             switch (item->type) {
                 case INT:
                     snprintf(result, TEXTMODE_COLS, item->text, *(uint8_t *)item->value);
@@ -1235,248 +939,63 @@ int menu() {
     return 0;
 }
 
-
 int InfoNES_LoadFrame() {
     if ((keyboard_bits.start || gamepad1_bits.start) && (keyboard_bits.select || gamepad1_bits.select)) {
         if (menu() == ROM_SELECT) {
             return -1;
         }
-        //if(selected == USB_DEVICE) {
-        //    return -2; // TODO: enum
-        //}
     }
     frames++;
 
     return 0;
 }
 
-// connection is possible 00->00 (external pull down)
-static int test_0000_case(uint32_t pin0, uint32_t pin1, int res) {
-    gpio_init(pin0);
-    gpio_set_dir(pin0, GPIO_OUT);
-    sleep_ms(33);
-    gpio_put(pin0, 1);
-
-    gpio_init(pin1);
-    gpio_set_dir(pin1, GPIO_IN);
-    gpio_pull_down(pin1); /// external pulled down (so, just to ensure)
-    sleep_ms(33);
-    if ( gpio_get(pin1) ) { // 1 -> 1, looks really connected
-        res |= (1 << 5) | 1;
-    }
-    gpio_deinit(pin0);
-    gpio_deinit(pin1);
-    return res;
-}
-
-// connection is possible 01->01 (no external pull up/down)
-static int test_0101_case(uint32_t pin0, uint32_t pin1, int res) {
-    gpio_init(pin0);
-    gpio_set_dir(pin0, GPIO_OUT);
-    sleep_ms(33);
-    gpio_put(pin0, 1);
-
-    gpio_init(pin1);
-    gpio_set_dir(pin1, GPIO_IN);
-    gpio_pull_down(pin1);
-    sleep_ms(33);
-    if ( gpio_get(pin1) ) { // 1 -> 1, looks really connected
-        res |= (1 << 5) | 1;
-    }
-    gpio_deinit(pin0);
-    gpio_deinit(pin1);
-    return res;
-}
-
-// connection is possible 11->11 (externally pulled up)
-static int test_1111_case(uint32_t pin0, uint32_t pin1, int res) {
-    gpio_init(pin0);
-    gpio_set_dir(pin0, GPIO_OUT);
-    sleep_ms(33);
-    gpio_put(pin0, 0);
-
-    gpio_init(pin1);
-    gpio_set_dir(pin1, GPIO_IN);
-    gpio_pull_up(pin1); /// external pulled up (so, just to ensure)
-    sleep_ms(33);
-    if ( !gpio_get(pin1) ) { // 0 -> 0, looks really connected
-        res |= 1;
-    }
-    gpio_deinit(pin0);
-    gpio_deinit(pin1);
-    return res;
-}
-
-static int testPins(uint32_t pin0, uint32_t pin1) {
-    int res = 0b000000;
-    /// do not try to test butter psram this way
-#ifdef BUTTER_PSRAM_GPIO
-    if (pin0 == BUTTER_PSRAM_GPIO || pin1 == BUTTER_PSRAM_GPIO) return res;
-#endif
-    if (pin0 == PICO_DEFAULT_LED_PIN || pin1 == PICO_DEFAULT_LED_PIN) return res; // LED
-    if (pin0 == 23 || pin1 == 23) return res; // SMPS Power
-    if (pin0 == 24 || pin1 == 24) return res; // VBus sense
-    // try pull down case (passive)
-    gpio_init(pin0);
-    gpio_set_dir(pin0, GPIO_IN);
-    gpio_pull_down(pin0);
-    gpio_init(pin1);
-    gpio_set_dir(pin1, GPIO_IN);
-    gpio_pull_down(pin1);
-    sleep_ms(33);
-    int pin0vPD = gpio_get(pin0);
-    int pin1vPD = gpio_get(pin1);
-    gpio_deinit(pin0);
-    gpio_deinit(pin1);
-    /// try pull up case (passive)
-    gpio_init(pin0);
-    gpio_set_dir(pin0, GPIO_IN);
-    gpio_pull_up(pin0);
-    gpio_init(pin1);
-    gpio_set_dir(pin1, GPIO_IN);
-    gpio_pull_up(pin1);
-    sleep_ms(33);
-    int pin0vPU = gpio_get(pin0);
-    int pin1vPU = gpio_get(pin1);
-    gpio_deinit(pin0);
-    gpio_deinit(pin1);
-
-    res = (pin0vPD << 4) | (pin0vPU << 3) | (pin1vPD << 2) | (pin1vPU << 1);
-
-    if (pin0vPD == 1) {
-        if (pin0vPU == 1) { // pin0vPD == 1 && pin0vPU == 1
-            if (pin1vPD == 1) { // pin0vPD == 1 && pin0vPU == 1 && pin1vPD == 1
-                if (pin1vPU == 1) { // pin0vPD == 1 && pin0vPU == 1 && pin1vPD == 1 && pin1vPU == 1
-                    // connection is possible 11->11 (externally pulled up)
-                    return test_1111_case(pin0, pin1, res);
-                } else { // pin0vPD == 1 && pin0vPU == 1 && pin1vPD == 1 && pin1vPU == 0
-                    // connection is impossible
-                    return res;
-                }
-            } else { // pin0vPD == 1 && pin0vPU == 1 && pin1vPD == 0
-                if (pin1vPU == 1) { // pin0vPD == 1 && pin0vPU == 1 && pin1vPD == 0 && pin1vPU == 1
-                    // connection is impossible
-                    return res;
-                } else { // pin0vPD == 1 && pin0vPU == 1 && pin1vPD == 0 && pin1vPU == 0
-                    // connection is impossible
-                    return res;
-                }
-            }
-        } else {  // pin0vPD == 1 && pin0vPU == 0
-            if (pin1vPD == 1) { // pin0vPD == 1 && pin0vPU == 0 && pin1vPD == 1
-                if (pin1vPU == 1) { // pin0vPD == 1 && pin0vPU == 0 && pin1vPD == 1 && pin1vPU == 1
-                    // connection is impossible
-                    return res;
-                } else { // pin0vPD == 1 && pin0vPU == 0 && pin1vPD == 1 && pin1vPU == 0
-                    // connection is possible 10->10 (pulled up on down, and pulled down on up?)
-                    return res |= (1 << 5) | 1; /// NOT SURE IT IS POSSIBLE TO TEST SUCH CASE (TODO: think about real cases)
-                }
-            } else { // pin0vPD == 1 && pin0vPU == 0 && pin1vPD == 0
-                if (pin1vPU == 1) { // pin0vPD == 1 && pin0vPU == 0 && pin1vPD == 0 && pin1vPU == 1
-                    // connection is impossible
-                    return res;
-                } else { // pin0vPD == 1 && pin0vPU == 0 && pin1vPD == 0 && pin1vPU == 0
-                    // connection is impossible
-                    return res;
-                }
-            }
-        }
-    } else { // pin0vPD == 0
-        if (pin0vPU == 1) { // pin0vPD == 0 && pin0vPU == 1
-            if (pin1vPD == 1) { // pin0vPD == 0 && pin0vPU == 1 && pin1vPD == 1
-                if (pin1vPU == 1) { // pin0vPD == 0 && pin0vPU == 1 && pin1vPD == 1 && pin1vPU == 1
-                    // connection is impossible
-                    return res;
-                } else { // pin0vPD == 0 && pin0vPU == 1 && pin1vPD == 1 && pin1vPU == 0
-                    // connection is impossible
-                    return res;
-                }
-            } else { // pin0vPD == 0 && pin0vPU == 1 && pin1vPD == 0
-                if (pin1vPU == 1) { // pin0vPD == 0 && pin0vPU == 1 && pin1vPD == 0 && pin1vPU == 1
-                    // connection is possible 01->01 (no external pull up/down)
-                    return test_0101_case(pin0, pin1, res);
-                } else { // pin0vPD == 0 && pin0vPU == 1 && pin1vPD == 0 && pin1vPU == 0
-                    // connection is impossible
-                    return res;
-                }
-            }
-        } else {  // pin0vPD == 0 && pin0vPU == 0
-            if (pin1vPD == 1) { // pin0vPD == 0 && pin0vPU == 0 && pin1vPD == 1
-                if (pin1vPU == 1) { // pin0vPD == 0 && pin0vPU == 0 && pin1vPD == 1 && pin1vPU == 1
-                    // connection is impossible
-                    return res;
-                } else { // pin0vPD == 0 && pin0vPU == 0 && pin1vPD == 1 && pin1vPU == 0
-                    // connection is impossible
-                    return res;
-                }
-            } else { // pin0vPD == 0 && pin0vPU == 0 && pin1vPD == 0
-                if (pin1vPU == 1) { // pin0vPD == 0 && pin0vPU == 0 && pin1vPD == 0 && pin1vPU == 1
-                    // connection is impossible
-                    return res;
-                } else { // pin0vPD == 0 && pin0vPU == 0 && pin1vPD == 0 && pin1vPU == 0
-                    // connection is possible 00->00 (externally pulled down)
-                    return test_0000_case(pin0, pin1, res);
-                }
-            }
-        }
-    }
-    return res;
-}
-
 int main() {
-#if !PICO_RP2040
-    volatile uint32_t *qmi_m0_timing=(uint32_t *)0x400d000c;
-    vreg_disable_voltage_limit();
-    vreg_set_voltage(VREG_VOLTAGE_1_60);
-    sleep_ms(33);
-    *qmi_m0_timing = 0x60007204;
-    set_sys_clock_khz(CPU_FREQ * KHZ, 0);
-    *qmi_m0_timing = 0x60007303;
-#else
-    hw_set_bits(&vreg_and_chip_reset_hw->vreg, VREG_AND_CHIP_RESET_VREG_VSEL_BITS);
-    sleep_ms(10);
-    set_sys_clock_khz(CPU_FREQ * KHZ, true);
-#endif
+    hw_set_bits(&vreg_and_chip_reset_hw->vreg, VREG_AND_CHIP_RESET_VREG_VSEL_BITS); // Піднімаємо напругу на ядрі для стабільності
+    sleep_ms(10);                                          // Чекаємо 10 мілісекунд, поки напруга вирівняється
+    
+    // ================= ЗНИЖЕННЯ ЧАСТОТИ (РЯТУНОК ВІД ЗАВИСАНЬ) =================
+    set_sys_clock_khz(250 * KHZ, true);                    // ЗНИЗИЛИ ЧАСТОТУ! Було 378 МГц (кип'ятильник), поставили 250 МГц для стабільної роботи без зависань
+    // ===========================================================================
 
-    gpio_init(PICO_DEFAULT_LED_PIN);
-    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
-    for (int i = 0; i < 6; i++) {
+    gpio_init(PICO_DEFAULT_LED_PIN);                       // Ініціалізуємо системний світлодіод
+    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);          // Встановлюємо світлодіод на вихід
+    for (int i = 0; i < 6; i++) {                          // Блимаємо світлодіодом при старті
         sleep_ms(33);
         gpio_put(PICO_DEFAULT_LED_PIN, true);
         sleep_ms(33);
         gpio_put(PICO_DEFAULT_LED_PIN, false);
     }
 
-    uint8_t link = testPins(VGA_BASE_PIN, VGA_BASE_PIN + 1);
-    SELECT_VGA = (link == 0) || (link == 0x1F);
+    tuh_init(BOARD_TUH_RHPORT);                            // Ініціалізуємо USB стек (навіть якщо не юзаємо клавіатуру, ядро цього вимагає)
 
-    // board_init();
-    tuh_init(BOARD_TUH_RHPORT);
-
-    memset(&SCREEN[0][0], 0, sizeof SCREEN);
+    memset(&SCREEN[0][0], 0, sizeof SCREEN);               // Очищаємо екран чорним кольором
 #if USE_PS2_KBD
     ps2kbd.init_gpio();
 #endif
-#if USE_NESPAD
-    nespad_begin(clock_get_hz(clk_sys) / 1000, NES_GPIO_CLK, NES_GPIO_DATA, NES_GPIO_LAT);
-#endif
-    sem_init(&vga_start_semaphore, 0, 1);
-    multicore_launch_core1(render_core);
-    sem_release(&vga_start_semaphore);
 
-    f_mount(&fs, "", 1);
-    f_mkdir(HOME_DIR);
-    load_config();
+    // ================= ІНІЦІАЛІЗАЦІЯ НАШИХ КНОПОК ПРИ СТАРТІ =================
+    uint8_t my_pins[] = {PIN_A, PIN_B, PIN_SELECT, PIN_START, PIN_UP, PIN_DOWN, PIN_LEFT, PIN_RIGHT}; // Масив наших фізичних пінів
+    for (int i = 0; i < 8; i++) {                          // Проходимо по всіх 8 пінах у циклі
+        gpio_init(my_pins[i]);                             // Вмикаємо пін у мікроконтролері
+        gpio_set_dir(my_pins[i], GPIO_IN);                 // Вказуємо, що пін працює на вхід (слухає кнопку)
+        gpio_pull_up(my_pins[i]);                          // Вмикаємо внутрішню підтяжку до 3.3В (щоб не ловити перешкоди з повітря)
+    }                                                      // Кінець циклу налаштування кнопок
+    // =========================================================================
+
+    sem_init(&vga_start_semaphore, 0, 1);                  // Налаштовуємо синхронізацію між двома ядрами процесора
+    multicore_launch_core1(render_core);                   // Запускаємо друге ядро для малювання графіки
+    sem_release(&vga_start_semaphore);                     // Даємо відмашку другому ядру починати роботу
+    load_config();                                         // Завантажуємо налаштування з пам'яті
 
 #ifndef BUILD_IN_GAMES
-    if (is_start_locked() || !parseROM(reinterpret_cast<const uint8_t *>(rom))) {
-        InfoNES_Menu();
+    if (!parseROM(reinterpret_cast<const uint8_t *>(rom)) && f_mount(&fs, "", 1) == FR_OK) { // Якщо гри немає в пам'яті
+        InfoNES_Menu();                                    // Показуємо меню вибору файлів
     }
 #endif
-    lock_start();
-    bool start_from_game = InfoNES_Main(true);
-    while (1) {
-        sleep_ms(500);
-        start_from_game = InfoNES_Main(start_from_game);
+    bool start_from_game = InfoNES_Main(true);             // Запускаємо головний цикл емулятора
+    while (1) {                                            // Нескінченний цикл підтримки роботи
+        sleep_ms(500);                                     // Чекаємо півсекунди
+        start_from_game = InfoNES_Main(start_from_game);   // Якщо гра вилетіла, перезапускаємо головний цикл
     }
 }
